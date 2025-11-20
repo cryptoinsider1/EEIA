@@ -16,13 +16,13 @@ HTTP API поверх ядра EEIA.
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Header
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from eeia.core.cache import OfflineCache
 from eeia.core.models import Packet, Policy
-from eeia.core.router import HybridRouter, PolicyStore
-
+from eeia.core.router import HybridRouter, PolicyStore, RoutingDecision
+from eeia.observability.domain_metrics import record_decision_metrics, global_domain_metrics
 
 def create_app(
     cache_path: Path | None = None,
@@ -82,7 +82,7 @@ def create_app(
         - всегда возвращаем решение в ответе,
         - кладём пакет в OfflineCache, если should_forward == False.
         """
-        decision = router.route(packet)
+        decision: RoutingDecision = router.route(packet)
 
         if not decision.should_forward:
             # если по политике нельзя/не нужно форвардить — сохраняем локально
@@ -101,7 +101,15 @@ def create_app(
                 "should_forward": decision.should_forward,
             },
         }
-        return JSONResponse(content=body)
+        return JSONResponse(body, status_code=200)
+
+    @app.get("/metrics")
+    async def metrics() -> PlainTextResponse:
+        """
+        Очень простой endpoint для съёма метрик Prometheus-подобным образом.
+        """
+        text = global_domain_metrics.as_prometheus_text()
+        return PlainTextResponse(text, media_type="text/plain; version=0.0.4")
 
     return app
 
