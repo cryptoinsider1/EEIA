@@ -1,0 +1,62 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Раз в сутки – фоновый аудит
+    - cron: "0 3 * * *"
+
+jobs:
+  deps-audit:
+    name: Python dependencies audit (pip-audit)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install project (with dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]"
+      
+      - name: Install pip-audit
+        run: |
+          python -m pip install pip-audit
+
+      - name: Run pip-audit
+        run: |
+          # Аудит установленного окружения
+          pip-audit --progress-spinner off
+
+  image-scan:
+    name: Container image scan (Trivy)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (local)
+        run: |
+          docker build -t eeia-api:${{ github.sha }} .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: eeia-api:${{ github.sha }}
+          format: 'table'
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
