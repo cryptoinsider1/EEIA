@@ -14,7 +14,7 @@ from eeia.core.cache import OfflineCache
 
 def _make_packet(priority: PacketPriority = PacketPriority.NORMAL) -> Packet:
     return Packet(
-        packet_id="pkt-000001",  # было "pkt-1" — стало 9 символов
+        packet_id="pkt-000001",  
         device_id="dev-000001",
         created_at=datetime.now(timezone.utc),
         env=Environment.GROUND,
@@ -39,7 +39,7 @@ def test_policy_store_and_router_basic():
 
     # добавляем политику для MEDICAL на земле с высоким приоритетом
     policy = Policy(
-        policy_id="p1",
+        policy_id="policy-1",
         name="Critical medical ground traffic",
         match_environment=Environment.GROUND,
         match_domain=Domain.MEDICAL,
@@ -62,7 +62,7 @@ def test_policy_store_and_router_basic():
     critical_packet = _make_packet(priority=PacketPriority.CRITICAL)
     decision_critical = router.route(critical_packet)
     assert decision_critical.policy is not None
-    assert decision_critical.policy.policy_id == "p1"
+    assert decision_critical.policy.policy_id == "policy-1"
     assert decision_critical.target_endpoint == "https://medical-core.example/api/events"
 
 

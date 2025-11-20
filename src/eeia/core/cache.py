@@ -86,7 +86,7 @@ class OfflineCache:
         Используем сериализацию через `model_dump()` → JSON.
         Важно: в очереди могут храниться только уже прошедшие базовую валидацию Packet.
         """
-        payload = packet.model_dump()
+        payload = packet.model_dump(mode="json")
         payload_json = json.dumps(payload, ensure_ascii=False)
 
         with sqlite3.connect(self._db_path) as conn:
@@ -98,7 +98,7 @@ class OfflineCache:
                 (
                     packet.packet_id,
                     packet.device_id,
-                    packet.created_at.isoformat(),
+                    payload["created_at"],
                     payload_json,
                 ),
             )
