@@ -11,10 +11,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -22,11 +22,23 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]" || python -m pip install -e .
-          # на всякий случай дотягиваем pytest/httpx,
-          # даже если вдруг dev-экстра не собрался
-          python -m pip install pytest httpx
+          python -m pip install -e ".[dev]"
 
       - name: Run tests
         run: |
-          python -m pytest
+          pytest
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: test   # собирать образ только если тесты зелёные
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        run: |
+          docker build -t eeia-api:0.1.0 .
