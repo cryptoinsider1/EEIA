@@ -7,3 +7,4 @@ name = "eeia"
 version = "0.1.0"
 description = "Ethereal Edge Integrity Architecture reference implementation (skeleton)"
 requires-python = ">=3.11"
+dependencies = ["pydantic>=2.7.0"]
