@@ -1,0 +1,15 @@
+# Kubernetes Deployment manifest placeholder.
+apiVersion: v1
+kind: Service
+metadata:
+  name: eeia-api
+  labels:
+    app: eeia-api
+spec:
+  type: ClusterIP
+  selector:
+    app: eeia-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000

@@ -1,0 +1,14 @@
+version: "3.9"
+
+services:
+  eeia-api:
+    image: ghcr.io/<cryptoinsider1>/EEIA:latest
+    # Альтернатива: собирать локально
+    # build: .
+    container_name: eeia-api
+    ports:
+      - "8000:8000"
+    environment:
+      # можно прокинуть любые конфиги
+      - EEIA_ENV=production
+    restart: unless-stopped

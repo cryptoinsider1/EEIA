@@ -1,0 +1,45 @@
+# Kubernetes Deployment manifest placeholder.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eeia-api
+  labels:
+    app: eeia-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: eeia-api
+  template:
+    metadata:
+      labels:
+        app: eeia-api
+    spec:
+      containers:
+        - name: eeia-api
+          image: ghcr.io/<YOUR_GITHUB_USERNAME>/EEIA:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: EEIA_ENV
+              value: "production"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
