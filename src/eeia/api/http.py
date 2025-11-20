@@ -63,7 +63,7 @@ def create_app(
         В демо-версии политика сразу попадает в in-memory PolicyStore.
         В реальной системе здесь будет слой персистентности/аудита.
         """
-        policy_store.upsert(policy)
+        policy_store.add(policy)
         return policy
 
     @app.get("/v1/policies", response_model=List[Policy], tags=["policies"])

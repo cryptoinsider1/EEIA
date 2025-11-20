@@ -42,6 +42,7 @@ class RoutingDecision:
     target_endpoint: Optional[str]
     store_in_timeseries: bool
     store_in_object_storage: bool
+    should_forward: bool = True
 
 
 class PolicyStore:
