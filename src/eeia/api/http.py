@@ -17,19 +17,22 @@ HTTP API поверх ядра EEIA.
 - простой trace_id через X-Request-Id:
   - если заголовок не пришёл — генерируем UUID4,
   - возвращаем его в теле и в заголовке X-Request-Id.
+- опциональный ML-hook для риск-скоринга Packet:
+  - можно передать кастомный PacketScorer;
+  - либо включить встроенный HeuristicPacketScorer через EEIA_ML_SCORING_ENABLED.
 """
 
 import os
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from eeia.core.cache import OfflineCache
 from eeia.core.models import Packet, Policy
-from eeia.core.router import HybridRouter, PolicyStore
+from eeia.core.router import HybridRouter, PolicyStore, RoutingDecision
 from eeia.observability.domain_metrics import (
     record_decision_metrics,
     global_domain_metrics,
@@ -42,32 +45,24 @@ def create_app(
     cache_path: Path | None = None,
     packet_scorer: PacketScorer | None = None,
 ) -> FastAPI:
-    ...
-    policy_store = PolicyStore()
-    router = HybridRouter(policy_store)
-    cache = OfflineCache(db_path=cache_path or Path("offline_cache.db"))
-
-    # ML-скорер (по умолчанию выключен, можно включить через DI или env)
-    ml_scorer: PacketScorer | None = packet_scorer
-    if ml_scorer is None:
-        # мягкий вариант: включить простой скорер по env-флагу
-        import os
-
-        if os.getenv("EEIA_ML_SCORING_ENABLED", "false").lower() == "true":
-            ml_scorer = HeuristicPacketScorer()
     """
     Фабрика FastAPI-приложения.
 
     cache_path:
         Путь к SQLite-базе для оффлайн-кэша.
         В продакшене это может быть внешний Volume или отдельный сервис.
+
+    packet_scorer:
+        Опциональный ML-скорер. Если не передан и
+        EEIA_ML_SCORING_ENABLED=true — включается встроенный
+        HeuristicPacketScorer.
     """
     app = FastAPI(
         title="EEIA Control Plane",
         version="0.1.0",
         description=(
             "Reference HTTP API for Ethereal Edge Integrity Architecture "
-            "(routing, policies, offline cache, observability, security)."
+            "(routing, policies, offline cache, observability, security, ML-hooks)."
         ),
     )
 
@@ -75,6 +70,13 @@ def create_app(
     policy_store = PolicyStore()
     router = HybridRouter(policy_store)
     cache = OfflineCache(db_path=cache_path or Path("offline_cache.db"))
+
+    # --- ML-скорер ----------------------------------------------------------
+    # ЛИБО берём то, что передали снаружи,
+    # ЛИБО, если включён флаг, поднимаем встроенный HeuristicPacketScorer.
+    ml_scorer: PacketScorer | None = packet_scorer
+    if ml_scorer is None and os.getenv("EEIA_ML_SCORING_ENABLED", "false").lower() == "true":
+        ml_scorer = HeuristicPacketScorer()
 
     # --- служебные эндпоинты ------------------------------------------------
     @app.get("/health", tags=["meta"])
@@ -119,10 +121,14 @@ def create_app(
         - trace_id берётся из X-Request-Id, если есть;
         - иначе генерируется uuid4;
         - возвращается в JSON и в заголовке X-Request-Id.
+
+        ML-hook:
+        - если сконфигурирован ml_scorer, добавляем в ответ блок decision.ml.
         """
         # --- trace_id --------------------------------------------------------
         trace_id = x_request_id or str(uuid.uuid4())
 
+        # --- Zero-Trust флаг -------------------------------------------------
         enforce = os.getenv("EEIA_SECURITY_ENFORCE", "false").lower() == "true"
 
         # --- Zero-Trust-проверка подписи ------------------------------------
@@ -131,7 +137,10 @@ def create_app(
             if not x_eeia_signature or not x_eeia_key_id:
                 raise HTTPException(
                     status_code=401,
-                    detail="Missing EEIA security headers (X-EEIA-Key-Id / X-EEIA-Signature)",
+                    detail=(
+                        "Missing EEIA security headers "
+                        "(X-EEIA-Key-Id / X-EEIA-Signature)"
+                    ),
                 )
 
             sec_result = verify_packet_hmac(
@@ -149,13 +158,23 @@ def create_app(
                 )
 
         # --- маршрутизация ---------------------------------------------------
-        decision = router.route(packet)
+        decision: RoutingDecision = router.route(packet)
 
-        # --- метрики домена (не ломаем запросы, если что-то сломалось) ------
+        # --- метрики домена (оборачиваем, чтобы не падать из-за метрик) -----
         try:
             record_decision_metrics(global_domain_metrics, packet, decision)
         except Exception:
             pass
+
+        # --- ML-скоринг (опционально) ---------------------------------------
+        ml_block: Dict[str, Any] | None = None
+        if ml_scorer is not None:
+            ml_res: ScoringResult = ml_scorer.score(packet)
+            ml_block = {
+                "score": ml_res.score,
+                "label": ml_res.label,
+                "reasons": ml_res.reasons,
+            }
 
         # --- оффлайн-кэш -----------------------------------------------------
         if not decision.should_forward:
@@ -171,6 +190,7 @@ def create_app(
                 "store_in_timeseries": decision.store_in_timeseries,
                 "store_in_object_storage": decision.store_in_object_storage,
                 "should_forward": decision.should_forward,
+                "ml": ml_block,
             },
         }
 

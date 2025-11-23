@@ -6,13 +6,20 @@ on:
   pull_request:
     branches: [ main ]
   schedule:
-    # Раз в сутки – фоновый аудит
+    # Ночной фоновой аудит
     - cron: "0 3 * * *"
+
+# Не копить висящие ранки на один и тот же ref
+concurrency:
+  group: security-scan-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   deps-audit:
     name: Python dependencies audit (pip-audit)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repo
@@ -26,20 +33,29 @@ jobs:
       - name: Install project (with dev extras)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ".[dev]"
-      
+          python -m pip install '.[dev]'
+
       - name: Install pip-audit
         run: |
           python -m pip install pip-audit
 
       - name: Run pip-audit
         run: |
-          # Аудит установленного окружения
+          # Скан установленного окружения. Если найдены уязвимости —
+          # шаг завершится с exit code != 0, job упадёт (это нормально для PR/push).
           pip-audit --progress-spinner off
 
-  image-scan:
-    name: Container image scan (Trivy)
+  image-build-and-scan:
+    name: Build & scan container image (Trivy + GHCR)
     runs-on: ubuntu-latest
+    needs: deps-audit
+    permissions:
+      contents: read
+      packages: write     # пушим образ в GHCR
+      security-events: write   # на будущее, если захочешь загружать SARIF
+
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/eeia-api
 
     steps:
       - name: Checkout repo
@@ -48,15 +64,43 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Docker image (local)
-        run: |
-          docker build -t eeia-api:${{ github.sha }} .
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+      - name: Login to GHCR
+        uses: docker/login-action@v3
         with:
-          image-ref: eeia-api:${{ github.sha }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      # --- Trivy: блокирующий скан для push / PR --------------------------
+      - name: Trivy scan (blocking for push/PR)
+        if: github.event_name != 'schedule'
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: 'table'
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'          # PR/push падают при HIGH/CRITICAL
+          ignore-unfixed: true    # опционально: не ругаться на unpatched
+
+      # --- Trivy: фоновый скан для schedule (не заваливает джоб) ----------
+      - name: Trivy scan (scheduled, non-blocking)
+        if: github.event_name == 'schedule'
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: 'table'
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
+          ignore-unfixed: true
