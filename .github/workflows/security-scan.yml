@@ -94,7 +94,7 @@ jobs:
       # ------------------------------
       - name: Trivy scan (blocking)
         if: github.event_name != 'schedule'
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: ${{ github.event_name == 'pull_request' && 'eeia-api:local' || format('{0}:{1}', env.IMAGE_NAME, env.SHORT_SHA) }}
           format: table
@@ -109,7 +109,7 @@ jobs:
       - name: Trivy scan (nightly)
         if: github.event_name == 'schedule'
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:latest
           format: table
